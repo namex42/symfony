@@ -748,7 +748,8 @@ abstract class AbstractObjectNormalizer extends AbstractNormalizer
                     }
                 }
 
-                if ($collectionValueType) {
+                $extendedType = $t instanceof ObjectType ? $t->getClassName() : null;
+                if (null !== $collectionValueType) {
                     try {
                         $collectionValueBaseType = $collectionValueType;
 
@@ -764,77 +765,51 @@ abstract class AbstractObjectNormalizer extends AbstractNormalizer
                         $collectionValueBaseType = Type::mixed();
                     }
 
-                    if ($collectionValueBaseType instanceof ObjectType) {
-                        $typeIdentifier = TypeIdentifier::OBJECT;
-                        $class = $collectionValueBaseType->getClassName().'[]';
-                        $context['key_type'] = $collectionKeyType;
-                        $context['value_type'] = $collectionValueType;
-                    } elseif (
+                    $dimensions = '[]';
+                    if (
                         // BC layer for type-info < 7.2
                         !class_exists(NullableType::class) && TypeIdentifier::ARRAY === $collectionValueBaseType->getTypeIdentifier()
                         || $collectionValueBaseType instanceof BuiltinType && TypeIdentifier::ARRAY === $collectionValueBaseType->getTypeIdentifier()
                     ) {
-                        // get inner type for any nested array
-                        $innerType = $collectionValueType;
-                        if ($innerType instanceof NullableType) {
-                            $innerType = $innerType->getWrappedType();
+                        $collectionValueBaseType = $collectionValueType;
+                        if ($collectionValueBaseType instanceof NullableType) {
+                            $collectionValueBaseType = $collectionValueBaseType->getWrappedType();
                         }
 
                         // note that it will break for any other builtinType
-                        $dimensions = '[]';
-                        while ($innerType instanceof CollectionType) {
+                        while ($collectionValueBaseType instanceof CollectionType) {
                             $dimensions .= '[]';
-                            $innerType = $innerType->getCollectionValueType();
-                            if ($innerType instanceof NullableType) {
-                                $innerType = $innerType->getWrappedType();
+                            $collectionValueBaseType = $collectionValueBaseType->getCollectionValueType();
+                            if ($collectionValueBaseType instanceof NullableType) {
+                                $collectionValueBaseType = $collectionValueBaseType->getWrappedType();
                             }
                         }
-
-                        while ($innerType instanceof WrappingTypeInterface) {
-                            $innerType = $innerType->getWrappedType();
-                        }
-
-                        if ($innerType instanceof ObjectType) {
-                            // the builtinType is the inner one and the class is the class followed by []...[]
-                            $typeIdentifier = TypeIdentifier::OBJECT;
-                            $class = $innerType->getClassName().$dimensions;
-                        } else {
-                            // default fallback (keep it as array)
-                            if ($t instanceof ObjectType) {
-                                $typeIdentifier = TypeIdentifier::OBJECT;
-                                $class = $t->getClassName();
-                            } else {
-                                $typeIdentifier = $t->getTypeIdentifier();
-                                $class = null;
-                            }
-                        }
-                    } elseif ($t instanceof ObjectType) {
-                        $typeIdentifier = TypeIdentifier::OBJECT;
-                        $class = $t->getClassName();
-                    } else {
-                        $typeIdentifier = $t->getTypeIdentifier();
-                        $class = null;
                     }
-                } else {
-                    if ($t instanceof ObjectType) {
-                        $typeIdentifier = TypeIdentifier::OBJECT;
-                        $class = $t->getClassName();
-                    } else {
-                        $typeIdentifier = $t->getTypeIdentifier();
-                        $class = null;
+
+                    while ($collectionValueBaseType instanceof WrappingTypeInterface) {
+                        $collectionValueBaseType = $collectionValueBaseType->getWrappedType();
                     }
+
+                    if ($collectionValueBaseType instanceof ObjectType) {
+                        $extendedType = $collectionValueBaseType->getClassName().$dimensions;
+                    } elseif ($collectionValueBaseType->getTypeIdentifier() !== TypeIdentifier::MIXED) {
+                        $extendedType = $collectionValueBaseType.$dimensions;
+                    }
+
+                    $context['key_type'] = $collectionKeyType;
+                    $context['value_type'] = $collectionValueType;
                 }
 
-                $expectedTypes[TypeIdentifier::OBJECT === $typeIdentifier && $class ? $class : $typeIdentifier->value] = true;
+                $expectedTypes[$extendedType ?? $typeIdentifier->value] = true;
 
-                if (TypeIdentifier::OBJECT === $typeIdentifier && null !== $class) {
+                if (null !== $extendedType) {
                     if (!$this->serializer instanceof DenormalizerInterface) {
-                        throw new LogicException(\sprintf('Cannot denormalize attribute "%s" for class "%s" because injected serializer is not a denormalizer.', $attribute, $class));
+                        throw new LogicException(\sprintf('Cannot denormalize attribute "%s" for class "%s" because injected serializer is not a denormalizer.', $attribute, $extendedType));
                     }
 
                     $childContext = $this->createChildContext($context, $attribute, $format);
-                    if ($this->serializer->supportsDenormalization($data, $class, $format, $childContext)) {
-                        return $this->serializer->denormalize($data, $class, $format, $childContext);
+                    if ($this->serializer->supportsDenormalization($data, $extendedType, $format, $childContext)) {
+                        return $this->serializer->denormalize($data, $extendedType, $format, $childContext);
                     }
                 }
 

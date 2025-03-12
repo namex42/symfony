@@ -1137,6 +1137,9 @@ class AbstractObjectNormalizerTest extends TestCase
     public function testDenormalizeCollectionOfScalarTypesPropertyWithPhpDocExtractor()
     {
         $normalizer = new AbstractObjectNormalizerWithMetadataAndPropertyTypeExtractors();
+        $serializer = new Serializer([new ArrayDenormalizer(), $normalizer]);
+        $normalizer->setSerializer($serializer);
+
         $data = [
             'type' => 'foo',
             'values' => [
@@ -1638,7 +1641,15 @@ class SerializerCollectionDummy implements SerializerInterface, DenormalizerInte
             }
         }
 
-        return null;
+        $isTypeMatched = match($type) {
+            'int' => \is_int($data),
+            'bool' => \is_bool($data),
+            'float' => \is_float($data),
+            'string' => \is_string($data),
+            default => false,
+        };
+
+        return $isTypeMatched ? $data : null;
     }
 
     public function getSupportedTypes(?string $format): array
